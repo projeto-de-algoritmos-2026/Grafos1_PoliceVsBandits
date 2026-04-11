@@ -20,6 +20,16 @@ class Game:
     def restart(self):
         self.generate_new_game()
 
+    def pos_to_id(self, pos):
+        r, c = pos
+        return r * self.cols + c
+
+    def path_to_ids(self, path):
+        return [self.pos_to_id(p) for p in path]
+
+    def format_ids_inline(self, ids_list):
+        return " → ".join(str(x) for x in ids_list)
+
     def is_valid(self, pos):
         r, c = pos
         return (
@@ -28,6 +38,10 @@ class Game:
             and self.grid[r][c] != "X"
         )
 
+    def get_police_path(self):
+        path, _ = shortest_path(self.grid, self.police_pos, self.exit_pos)
+        return path
+
     def move_police(self, dr, dc):
         nr = self.police_pos[0] + dr
         nc = self.police_pos[1] + dc
@@ -35,23 +49,21 @@ class Game:
 
         if not self.is_valid(new_pos):
             self.message = "Movimento inválido."
-            return
+            return False
 
         self.police_pos = new_pos
         self.turn += 1
 
         if self.police_pos == self.exit_pos:
             self.message = "Você encontrou a saída!"
-        else:
-            path, dist = shortest_path(self.grid, self.police_pos, self.exit_pos)
-            if path and dist is not None:
-                self.message = f"Turno {self.turn}. Menor caminho restante: {dist}."
-            else:
-                self.message = "Não existe caminho até a saída."
+            return True
 
-    def get_police_path(self):
-        path, _ = shortest_path(self.grid, self.police_pos, self.exit_pos)
-        return path
+        path, dist = shortest_path(self.grid, self.police_pos, self.exit_pos)
+        if path and dist is not None:
+            self.message = f"Turno {self.turn}. Menor caminho restante: {dist}."
+        else:
+            self.message = "Não existe caminho até a saída."
+        return True
 
     def get_summary(self):
         path, dist = shortest_path(self.grid, self.police_pos, self.exit_pos)
@@ -60,4 +72,30 @@ class Game:
             "rows": self.rows,
             "cols": self.cols,
             "remaining_path": dist,
+            "phase": "search",
+            "distance_value": "-",
+            "bandits_on_map": 0,
+            "bandits_reached_exit": 0,
+            "bandits_captured": 0,
         }
+
+    def get_current_distances_to_police(self):
+        return []
+
+    def get_real_police_path_ids(self):
+        return [self.pos_to_id(self.police_pos)]
+
+    def get_initial_shortest_path_ids(self):
+        path = self.get_police_path()
+        return self.path_to_ids(path) if path else []
+
+    def get_move_log_lines(self):
+        return []
+
+    def get_captured_bandits_lines(self):
+        return []
+
+    in_analysis_screen = False
+    phase = "search"
+    bandits = []
+    valid_ring_positions = []
