@@ -2,6 +2,9 @@ import pygame
 from colors import *
 from settings import *
 
+def get_font(size, bold=False):
+    preferred = ["Segoe UI", "Inter", "Calibri", "Arial"]
+    return pygame.font.SysFont(preferred, size, bold=bold)
 
 def cell_rect(row, col):
     x = GRID_OFFSET_X + col * CELL_SIZE
