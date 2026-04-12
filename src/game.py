@@ -11,18 +11,23 @@ class Game:
         self.cols = cols
 
         self.turn = 0
-        self.phase = "search"
+        self.phase = "search"   # search | escape | done
         self.message = ""
         self.bandit_paths = []
         self.valid_ring_positions = []
         self.bandits_reached_exit = 0
         self.bandits_captured = 0
 
-        self.bandits = []
+        self.final_police_path = []
+        self.final_bandit_paths = []
+        self.show_final_graphs = False
+        self.in_analysis_screen = False
+
         self.police_history = []
         self.bandit_history = []
         self.move_log = []
         self.captured_bandits_log = []
+
         self.initial_shortest_path = []
 
         self.generate_new_game()
@@ -39,8 +44,13 @@ class Game:
         self.bandits_reached_exit = 0
         self.bandits_captured = 0
 
-        self.update_valid_ring()
+        self.final_police_path = []
+        self.final_bandit_paths = []
+        self.show_final_graphs = False
+        self.in_analysis_screen = False
+
         self.bandits = self.spawn_bandits()
+        self.update_valid_ring()
 
         self.police_history = [self.police_pos]
         self.bandit_history = [[b] for b in self.bandits]
@@ -89,6 +99,7 @@ class Game:
         ]
 
     def spawn_bandits(self):
+        self.update_valid_ring()
         candidates = self.valid_ring_positions[:]
         random.shuffle(candidates)
         return candidates[: self.num_bandits]
@@ -112,11 +123,16 @@ class Game:
 
         new_bandits = []
         new_histories = []
+
+        current_bandits = self.bandits[:]
+        current_histories = self.bandit_history[:]
+
         occupied = set()
         captured_now = 0
 
-        for i, bandit in enumerate(self.bandits):
-            history = self.bandit_history[i][:]
+        for i, bandit in enumerate(current_bandits):
+            history = current_histories[i][:]
+
             local_moves = self._candidate_bandit_moves(bandit)
 
             valid_local_moves = []
@@ -133,6 +149,7 @@ class Game:
                     "bandit_index": i + 1,
                     "turn": self.turn,
                     "vertex_id": self.pos_to_id(bandit),
+                    "position": bandit,
                     "reason": "encurralado sem movimento local válido na distância exata",
                 })
                 continue
@@ -153,20 +170,31 @@ class Game:
         self.bandits = new_bandits
         self.bandit_history = new_histories
         self.bandits_captured += captured_now
+
         self.update_valid_ring()
+
+        if captured_now > 0:
+            self.message = (
+                f"{captured_now} bandido(s) foram presos por não conseguirem manter "
+                f"distância exata {self.distance_value} com movimento local."
+            )
 
     def register_move_log(self, old_pos, new_pos):
         shortest_now, _ = shortest_path(self.grid, new_pos, self.exit_pos)
-        old_shortest, _ = shortest_path(self.grid, old_pos, self.exit_pos)
 
-        optimal_move = False
+        old_shortest, _ = shortest_path(self.grid, old_pos, self.exit_pos)
         if old_shortest and len(old_shortest) >= 2:
-            optimal_move = old_shortest[1] == new_pos
+            optimal_move = (old_shortest[1] == new_pos)
+        else:
+            optimal_move = False
 
         self.move_log.append({
             "step": len(self.move_log) + 1,
+            "from_pos": old_pos,
+            "to_pos": new_pos,
             "from_id": self.pos_to_id(old_pos),
             "to_id": self.pos_to_id(new_pos),
+            "shortest_path_positions": shortest_now[:] if shortest_now else [],
             "shortest_path_ids": self.path_to_ids(shortest_now) if shortest_now else [],
             "shortest_path_len": max(0, len(shortest_now) - 1) if shortest_now else -1,
             "optimal": optimal_move,
@@ -177,6 +205,7 @@ class Game:
             return False
 
         old_pos = self.police_pos
+
         nr = self.police_pos[0] + dr
         nc = self.police_pos[1] + dc
         new_pos = (nr, nc)
@@ -188,19 +217,24 @@ class Game:
         self.police_pos = new_pos
         self.turn += 1
         self.police_history.append(self.police_pos)
+
         self.register_move_log(old_pos, new_pos)
 
         if self.police_pos == self.exit_pos:
             self.start_escape_phase()
             return True
 
+        previous_message = self.message
         self.reposition_bandits()
 
-        path = self.get_police_path()
-        if path:
-            self.message = f"Turno {self.turn}. Menor caminho restante até a saída: {len(path) - 1}."
-        else:
-            self.message = "A saída ficou inacessível a partir da posição atual."
+        if self.message == previous_message or "presos" not in self.message:
+            path = self.get_police_path()
+            if path:
+                self.message = (
+                    f"Turno {self.turn}. Menor caminho restante até a saída: {len(path) - 1}."
+                )
+            else:
+                self.message = "A saída ficou inacessível a partir da posição atual."
         return True
 
     def start_escape_phase(self):
@@ -219,13 +253,23 @@ class Game:
                 survivor_history.append(self.bandit_history[i])
             else:
                 self.bandits_captured += 1
+                self.captured_bandits_log.append({
+                    "bandit_index": i + 1,
+                    "turn": self.turn,
+                    "vertex_id": self.pos_to_id(bandit),
+                    "position": bandit,
+                    "reason": "sem rota até a saída na fase final",
+                })
 
         self.bandits = survivors
         self.bandit_history = survivor_history
 
         if not self.bandits:
             self.phase = "done"
-            self.message = "Fim da simulação. Nenhum bandido restante conseguiu rota até a saída."
+            self.message = (
+                "Fim da simulação. Nenhum bandido restante conseguiu rota até a saída. "
+                "Clique em 'Gerar grafos finais'."
+            )
 
     def update_escape(self):
         if self.phase != "escape":
@@ -265,8 +309,38 @@ class Game:
 
         if not self.bandits:
             self.phase = "done"
-            self.message = "Fim da simulação."
+            self.message = (
+                f"Fim da simulação. {self.bandits_reached_exit} bandido(s) chegaram à saída e "
+                f"{self.bandits_captured} foram presos. Clique em 'Gerar grafos finais'."
+            )
+        else:
+            self.message = (
+                f"Fase final em andamento. "
+                f"{self.bandits_reached_exit} bandido(s) já chegaram à saída."
+            )
         return True
+
+    def generate_final_graphs(self):
+        if self.phase != "done":
+            return
+
+        self.show_final_graphs = True
+        self.final_police_path = self.police_history[:]
+        self.final_bandit_paths = [history[:] for history in self.bandit_history]
+        self.in_analysis_screen = True
+        self.message = "Tela final de análise gerada."
+
+    def exit_analysis_screen(self):
+        self.in_analysis_screen = False
+
+    def get_current_distances_to_police(self):
+        distances, _ = bfs_distances(self.grid, self.police_pos)
+        result = []
+
+        for bandit in self.bandits:
+            result.append(distances.get(bandit, None))
+
+        return result
 
     def get_summary(self):
         police_path = self.get_police_path()
@@ -274,22 +348,23 @@ class Game:
 
         return {
             "turn": self.turn,
-            "rows": self.rows,
-            "cols": self.cols,
-            "remaining_path": remaining,
             "phase": self.phase,
             "distance_value": self.distance_value,
             "bandits_on_map": len(self.bandits),
             "bandits_reached_exit": self.bandits_reached_exit,
             "bandits_captured": self.bandits_captured,
+            "remaining_path": remaining,
+            "show_final_graphs": self.show_final_graphs,
+            "in_analysis_screen": self.in_analysis_screen,
+            "real_police_len": max(0, len(self.police_history) - 1),
+            "initial_shortest_len": max(0, len(self.initial_shortest_path) - 1),
+            "rows": self.rows,
+            "cols": self.cols,
         }
-
-    def get_current_distances_to_police(self):
-        distances, _ = bfs_distances(self.grid, self.police_pos)
-        return [distances.get(b, None) for b in self.bandits]
 
     def get_move_log_lines(self):
         lines = []
+
         for item in self.move_log:
             path_str = " → ".join(str(x) for x in item["shortest_path_ids"])
             status = "ótima" if item["optimal"] else "desvio"
@@ -297,6 +372,7 @@ class Game:
                 f"{item['step']}. {item['from_id']} → {item['to_id']} | "
                 f"{status} | tam={item['shortest_path_len']} | menor caminho: {path_str}"
             )
+
         return lines
 
     def get_captured_bandits_lines(self):
@@ -307,6 +383,3 @@ class Game:
                 f"vértice {item['vertex_id']} | {item['reason']}"
             )
         return lines
-
-    in_analysis_screen = False
-    show_final_graphs = False
