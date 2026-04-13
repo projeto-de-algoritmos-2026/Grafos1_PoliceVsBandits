@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Police vs Bandits - Graph Game</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <h1>🚔 Police vs Bandits</h1>
+            <p class="subtitle">Algoritmo de Prim</p>
+        </header>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Game Area -->
+            <div class="game-area">
+                <div class="game-board">
+                    <canvas id="gameCanvas"></canvas>
+                </div>
+                <div class="game-info">
+                    <div class="info-box">
+                        <h3>📊 Estatísticas</h3>
+                        <p><strong>Turno:</strong> <span id="turn">0</span></p>
+                        <p><strong>Bandidos Capturados:</strong> <span id="captured">0</span></p>
+                        <p><strong>Bandidos Fugidos:</strong> <span id="escaped">0</span></p>
+                        <p><strong>Fase:</strong> <span id="phase">search</span></p>
+                    </div>
+                    <div class="message-box">
+                        <p id="message">Clique em "Iniciar Jogo" para começar</p>
+                    </div>
+                </div>
+
+                <div class="live-paths-box">
+                    <h3>🧭 Menores Caminhos Atuais até a Saída</h3>
+                    <p><strong>Polícia:</strong> <span id="livePolicePath">-</span></p>
+                    <div id="liveBanditPaths"></div>
+                </div>
+            </div>
+
+            <!-- Control Panel -->
+            <div class="control-panel">
+                <!-- Setup Section -->
+                <div class="panel-section setup-section" id="setupSection">
+                    <h2>⚙️ Configuração</h2>
+                    
+                    <div class="form-group">
+                        <label for="rowsInput">Linhas do Mapa:</label>
+                        <input type="number" id="rowsInput" min="4" max="20" value="12">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="colsInput">Colunas do Mapa:</label>
+                        <input type="number" id="colsInput" min="4" max="20" value="16">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="distanceInput">Distância Mínima (Bandidos):</label>
+                        <input type="number" id="distanceInput" min="1" max="10" value="3">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="banditsInput">Número de Bandidos:</label>
+                        <input type="number" id="banditsInput" min="1" max="10" value="3">
+                    </div>
+                    
+                    <button id="startBtn" class="btn btn-start">🎮 Iniciar Jogo</button>
+                </div>
+
+                <!-- Game Controls Section -->
+                <div class="panel-section controls-section" id="controlsSection" style="display: none;">
+                    <h2>🎮 Controles</h2>
+                    
+                    <div class="movement-controls">
+                        <button class="move-btn up" data-move="up" title="Seta para cima">
+                            <span>▲</span>
+                        </button>
+                        <div class="side-controls">
+                            <button class="move-btn left" data-move="left" title="Seta para esquerda">
+                                <span>◄</span>
+                            </button>
+                            <button class="move-btn down" data-move="down" title="Seta para baixo">
+                                <span>▼</span>
+                            </button>
+                            <button class="move-btn right" data-move="right" title="Seta para direita">
+                                <span>►</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <p class="info-text">Use as setas ou clique nos botões para mover a polícia</p>
+
+                    <div class="action-buttons">
+                        <button id="restartBtn" class="btn btn-secondary">🔄 Reiniciar</button>
+                        <button id="escapeStepBtn" class="btn btn-secondary" style="display: none;">⏭️ Próximo</button>
+                        <button id="finalReportBtn" class="btn btn-secondary" style="display: none;">📊 Ver Relatório</button>
+                    </div>
+                </div>
+
+                <!-- Legend -->
+                <div class="panel-section legend-section">
+                    <h2>🔍 Legenda</h2>
+                    <div class="legend-item">
+                        <div class="legend-color police"></div>
+                        <span>Polícia</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color bandit"></div>
+                        <span>Bandidos</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color exit"></div>
+                        <span>Saída</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color path"></div>
+                        <span>Caminho Mais Curto</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color wall"></div>
+                        <span>Parede</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color empty"></div>
+                        <span>Caminho Livre</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Final Report Screen -->
+        <div class="report-screen" id="reportScreen" style="display: none;">
+            <div class="report-container">
+                <div class="report-header">
+                    <h2>📊 Relatório Final - Police vs Bandits</h2>
+                    <button class="btn-close" id="closeReportBtn">&times;</button>
+                </div>
+
+                <div class="report-content">
+                    <!-- Estatísticas Resumo -->
+                    <section class="report-section">
+                        <h3>📈 Resumo da Simulação</h3>
+                        <div class="stats-grid">
+                            <div class="stat">
+                                <span class="stat-label">Turnos Totais:</span>
+                                <span class="stat-value" id="reportTurns">0</span>
+                            </div>
+                            <div class="stat">
+                                <span class="stat-label">Bandidos Capturados:</span>
+                                <span class="stat-value" id="reportCaptured">0</span>
+                            </div>
+                            <div class="stat">
+                                <span class="stat-label">Bandidos Fugidos:</span>
+                                <span class="stat-value" id="reportEscaped">0</span>
+                            </div>
+                            <div class="stat">
+                                <span class="stat-label">Caminho da Polícia:</span>
+                                <span class="stat-value" id="reportPoliceLen">0</span>
+                            </div>
+                            <div class="stat">
+                                <span class="stat-label">Caminho Ótimo:</span>
+                                <span class="stat-value" id="reportOptimalLen">0</span>
+                            </div>
+                            <div class="stat">
+                                <span class="stat-label">Eficiência:</span>
+                                <span class="stat-value" id="reportEfficiency">0%</span>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- Grafo de Prim -->
+                    <section class="report-section">
+                        <h3>Grafo Gerado (Labirinto)</h3>
+                        <div class="prim-info">
+                            <p><strong>Grade:</strong> <span id="primGrid">12x16</span></p>
+                            <p><strong>Total de Células:</strong> <span id="primTotal">192</span></p>
+                            <p><strong>Paredes:</strong> <span id="primWalls">0</span> (<span id="primWallPercent">0%</span>)</p>
+                            <p><strong>Caminhos:</strong> <span id="primPaths">0</span> (<span id="primPathPercent">0%</span>)</p>
+                        </div>
+                        <canvas id="primCanvas" style="width: 100%; margin-top: 15px; border: 2px solid #bdc3c7; border-radius: 8px;"></canvas>
+                    </section>
+
+                    <!-- Caminhos dos Bandidos -->
+                    <section class="report-section">
+                        <h3>🦹 Caminhos Mais Curtos - Bandidos para Polícia</h3>
+                        <div id="banditPathsContainer" class="paths-container"></div>
+                    </section>
+
+                    <!-- Caminho da Polícia -->
+                    <section class="report-section">
+                        <h3>🚔 Caminho da Polícia até a Saída</h3>
+                        <div id="policePathContainer" class="path-box">
+                            <p id="policePath">-</p>
+                        </div>
+                    </section>
+
+                    <!-- Log de Movimentos -->
+                    <section class="report-section">
+                        <h3>📋 Log de Movimentos</h3>
+                        <div id="moveLogContainer" class="log-container"></div>
+                    </section>
+
+                    <!-- Bandidos Capturados -->
+                    <section class="report-section" id="capturedSection" style="display: none;">
+                        <h3>⛔ Bandidos Capturados</h3>
+                        <div id="capturedLogContainer" class="log-container"></div>
+                    </section>
+                </div>
+
+                <div class="report-footer">
+                    <button id="backToGameBtn" class="btn btn-start">🎮 Voltar ao Jogo</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
