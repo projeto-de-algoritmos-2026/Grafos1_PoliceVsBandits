@@ -1,5 +1,5 @@
 import random
-from graph_utils import bfs_distances, shortest_path, get_neighbors
+from graph_utils import bfs_distances, shortest_path, get_neighbors, prims_shortest_path
 from map_generator import generate_valid_map
 
 
@@ -29,6 +29,8 @@ class Game:
         self.captured_bandits_log = []
 
         self.initial_shortest_path = []
+        self.initial_police_to_exit_path = {"path": [], "distance": None, "path_ids": []}
+        self.initial_bandit_paths_to_police = []
 
         self.generate_new_game()
 
@@ -59,6 +61,8 @@ class Game:
 
         path, _ = shortest_path(self.grid, self.police_pos, self.exit_pos)
         self.initial_shortest_path = path[:] if path else []
+        self.initial_police_to_exit_path = self.get_police_to_exit_path()
+        self.initial_bandit_paths_to_police = self.get_bandit_to_police_paths()
 
     def restart(self):
         self.generate_new_game()
@@ -99,16 +103,25 @@ class Game:
         ]
 
     def spawn_bandits(self):
-        self.update_valid_ring()
-        candidates = self.valid_ring_positions[:]
+        candidates = []
+        for r in range(self.rows):
+            for c in range(self.cols):
+                pos = (r, c)
+                if self.grid[r][c] == "." and pos != self.police_pos and pos != self.exit_pos:
+                    candidates.append(pos)
+
+        # fallback para mapas muito pequenos
+        if not candidates:
+            self.update_valid_ring()
+            candidates = self.valid_ring_positions[:]
+
         random.shuffle(candidates)
         return candidates[: self.num_bandits]
 
     def _candidate_bandit_moves(self, bandit_pos):
         candidates = [bandit_pos]
         for neighbor in get_neighbors(self.grid, bandit_pos):
-            if neighbor != self.exit_pos:
-                candidates.append(neighbor)
+            candidates.append(neighbor)
 
         unique = []
         seen = set()
@@ -117,6 +130,38 @@ class Game:
                 unique.append(pos)
                 seen.add(pos)
         return unique
+
+    def _distance_to_exit_with_prim(self, pos):
+        path, dist = prims_shortest_path(self.grid, pos, self.exit_pos)
+        if not path or dist is None:
+            return None
+        return dist
+
+    def _capture_bandits_on_police(self):
+        survivors = []
+        survivor_history = []
+        captured_now = 0
+
+        for i, bandit in enumerate(self.bandits):
+            history = self.bandit_history[i]
+            if bandit == self.police_pos:
+                captured_now += 1
+                self.captured_bandits_log.append({
+                    "bandit_index": i + 1,
+                    "turn": self.turn,
+                    "vertex_id": self.pos_to_id(bandit),
+                    "position": bandit,
+                    "reason": "capturado pela polícia",
+                })
+                continue
+
+            survivors.append(bandit)
+            survivor_history.append(history)
+
+        self.bandits = survivors
+        self.bandit_history = survivor_history
+        self.bandits_captured += captured_now
+        return captured_now
 
     def reposition_bandits(self):
         distances_from_police, _ = bfs_distances(self.grid, self.police_pos)
@@ -128,56 +173,78 @@ class Game:
         current_histories = self.bandit_history[:]
 
         occupied = set()
-        captured_now = 0
+        escaped_now = 0
 
         for i, bandit in enumerate(current_bandits):
             history = current_histories[i][:]
 
             local_moves = self._candidate_bandit_moves(bandit)
 
-            valid_local_moves = []
-            for pos in local_moves:
-                d = distances_from_police.get(pos, None)
-                if d == self.distance_value and pos != self.exit_pos:
-                    valid_local_moves.append(pos)
+            valid_local_moves = [pos for pos in local_moves if pos not in occupied]
 
-            valid_local_moves = [pos for pos in valid_local_moves if pos not in occupied]
+            safe_moves = []
+            fallback_moves = []
+            for pos in valid_local_moves:
+                d_exit = self._distance_to_exit_with_prim(pos)
+                d_police = distances_from_police.get(pos, None)
+                if d_exit is None or d_police is None:
+                    continue
 
-            if not valid_local_moves:
-                captured_now += 1
+                candidate = (d_exit, -d_police, self.pos_to_id(pos), pos)
+                if d_police >= self.distance_value:
+                    safe_moves.append(candidate)
+                else:
+                    fallback_moves.append(candidate)
+
+            if safe_moves:
+                safe_moves.sort(key=lambda item: (item[0], item[1], item[2]))
+                best = safe_moves[0][3]
+            elif fallback_moves:
+                # Sem opção segura: tenta maximizar distância da polícia.
+                fallback_moves.sort(key=lambda item: (item[1], item[0], item[2]))
+                best = fallback_moves[0][3]
+            else:
+                # Sem rota para saída, fica parado se possível.
+                best = bandit
+
+            history.append(best)
+
+            if best == self.police_pos:
+                self.bandits_captured += 1
                 self.captured_bandits_log.append({
                     "bandit_index": i + 1,
                     "turn": self.turn,
-                    "vertex_id": self.pos_to_id(bandit),
-                    "position": bandit,
-                    "reason": "encurralado sem movimento local válido na distância exata",
+                    "vertex_id": self.pos_to_id(best),
+                    "position": best,
+                    "reason": "interceptado ao tentar fugir",
                 })
                 continue
 
-            best = min(
-                valid_local_moves,
-                key=lambda p: (
-                    abs(p[0] - bandit[0]) + abs(p[1] - bandit[1]),
-                    self.pos_to_id(p),
-                ),
-            )
+            if best == self.exit_pos:
+                escaped_now += 1
+                self.bandits_reached_exit += 1
+                continue
 
             occupied.add(best)
             new_bandits.append(best)
-            history.append(best)
             new_histories.append(history)
 
         self.bandits = new_bandits
         self.bandit_history = new_histories
-        self.bandits_captured += captured_now
+        return escaped_now
 
-        self.update_valid_ring()
-
-        if captured_now > 0:
-            self.message = (
-                f"{captured_now} bandido(s) foram presos por não conseguirem manter "
-                f"distância exata {self.distance_value} com movimento local."
-            )
+    def get_bandit_paths_to_exit(self):
+        paths = []
+        for i, bandit in enumerate(self.bandits):
+            path, dist = shortest_path(self.grid, bandit, self.exit_pos)
+            paths.append({
+                "bandit_idx": i,
+                "bandit_pos": list(bandit),
+                "path": [list(p) for p in path] if path else [],
+                "distance": dist,
+                "path_ids": self.path_to_ids(path) if path else [],
+            })
+        return paths
 
     def register_move_log(self, old_pos, new_pos):
         shortest_now, _ = shortest_path(self.grid, new_pos, self.exit_pos)
@@ -220,21 +287,25 @@ class Game:
 
         self.register_move_log(old_pos, new_pos)
 
-        if self.police_pos == self.exit_pos:
-            self.start_escape_phase()
+        captured_on_contact = self._capture_bandits_on_police()
+        escaped_now = self.reposition_bandits()
+        captured_after_move = self._capture_bandits_on_police()
+
+        if not self.bandits:
+            self.phase = "done"
+            self.message = (
+                f"Fim da simulação. {self.bandits_reached_exit} bandido(s) fugiram e "
+                f"{self.bandits_captured} foram capturados."
+            )
             return True
 
-        previous_message = self.message
-        self.reposition_bandits()
-
-        if self.message == previous_message or "presos" not in self.message:
-            path = self.get_police_path()
-            if path:
-                self.message = (
-                    f"Turno {self.turn}. Menor caminho restante até a saída: {len(path) - 1}."
-                )
-            else:
-                self.message = "A saída ficou inacessível a partir da posição atual."
+        police_exit_path = self.get_police_path()
+        remaining = len(police_exit_path) - 1 if police_exit_path else "sem rota"
+        self.message = (
+            f"Turno {self.turn}. Distância polícia→saída: {remaining}. "
+            f"Fugiram neste turno: {escaped_now}. "
+            f"Capturados neste turno: {captured_on_contact + captured_after_move}."
+        )
         return True
 
     def start_escape_phase(self):
@@ -246,7 +317,7 @@ class Game:
         survivor_history = []
 
         for i, bandit in enumerate(self.bandits):
-            path, dist = shortest_path(self.grid, bandit, self.exit_pos)
+            path, dist = prims_shortest_path(self.grid, bandit, self.exit_pos)
             if path and dist is not None:
                 self.bandit_paths.append(path[:])
                 survivors.append(bandit)
@@ -383,3 +454,58 @@ class Game:
                 f"vértice {item['vertex_id']} | {item['reason']}"
             )
         return lines
+
+    def get_bandit_to_police_paths(self):
+        """Calcula caminhos mais curtos de cada bandido até a polícia"""
+        paths = []
+        distances, _ = bfs_distances(self.grid, self.police_pos)
+        
+        for i, bandit in enumerate(self.bandits):
+            path, dist = shortest_path(self.grid, bandit, self.police_pos)
+            paths.append({
+                "bandit_idx": i,
+                "bandit_pos": list(bandit),
+                "path": [list(p) for p in path] if path else [],
+                "distance": dist,
+                "path_ids": self.path_to_ids(path) if path else [],
+            })
+        return paths
+
+    def get_police_to_exit_path(self):
+        """Retorna caminho mais curto da polícia até a saída"""
+        path, dist = shortest_path(self.grid, self.police_pos, self.exit_pos)
+        return {
+            "path": [list(p) for p in path] if path else [],
+            "distance": dist,
+            "path_ids": self.path_to_ids(path) if path else [],
+        }
+
+    def get_prim_graph_info(self):
+        """Retorna informações do grafo gerado por Prim para visualização"""
+        return {
+            "rows": self.rows,
+            "cols": self.cols,
+            "grid": self.grid,
+            "total_cells": self.rows * self.cols,
+            "wall_count": sum(row.count("X") for row in self.grid),
+            "path_count": sum(1 for r in self.grid for c in r if c != "X"),
+        }
+
+    def get_final_report(self):
+        """Gera relatório final completo"""
+        bandit_paths_to_exit = self.get_bandit_paths_to_exit()
+        bandit_paths_to_police = self.initial_bandit_paths_to_police[:]
+        police_exit_path = self.initial_police_to_exit_path
+        prim_info = self.get_prim_graph_info()
+        
+        return {
+            "summary": self.get_summary(),
+            "bandit_paths_to_exit": bandit_paths_to_exit,
+            "bandit_paths_to_police": bandit_paths_to_police,
+            "police_path_to_exit": police_exit_path,
+            "prim_graph": prim_info,
+            "move_log": self.move_log,
+            "captured_bandits_log": self.captured_bandits_log,
+            "police_history": [list(p) for p in self.police_history],
+            "bandit_history": [[list(p) for p in history] for history in self.bandit_history],
+        }
