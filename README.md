@@ -33,8 +33,6 @@ Como funciona:
 
 ## Screenshots
 
-Exemplo de inclusão no README:
-
 ![Tela inicial](docs/img/tela-inicial.png)
 ![Jogo em andamento](docs/img/jogo-em-andamento.png)
 ![Relatório final](docs/img/relatorio-final.png)
