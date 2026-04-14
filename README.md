@@ -76,3 +76,17 @@ Fluxo recomendado:
 2. Iniciar partida.
 3. Mover a polícia e tentar interceptar os bandidos antes da fuga.
 4. Ao finalizar a simulação, abrir o relatório final para análise dos caminhos e estatísticas.
+
+## Vídeo de Apresentação
+### Opção 1: YouTube (miniatura clicável)
+
+[![Assista ao vídeo no YouTube](https://img.youtube.com/vi/4YBEyfTHQzw/hqdefault.jpg)](https://youtu.be/4YBEyfTHQzw)
+
+### Opção 2: Player direto no README (arquivo mp4)
+
+> Coloque o arquivo de vídeo em `docs/video/apresentacao.mp4`.
+
+<video width="800" controls>
+	<source src="docs/video/apresentacao.mp4" type="video/mp4">
+	Seu navegador não suporta vídeo embutido.
+</video>
